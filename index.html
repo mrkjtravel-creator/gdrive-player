@@ -3440,5 +3440,12 @@ link.rel = 'manifest';
 link.href = url;
 document.head.appendChild(link);
 </script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js');
+    });
+  }
+</script>
 </body>
 </html>
