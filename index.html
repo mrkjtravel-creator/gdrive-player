@@ -353,6 +353,8 @@
 
   .now-info { min-width: 0; }
   .now-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  @keyframes marquee-scroll { 0% { transform: translateX(0); } 100% { transform: translateX(var(--marquee-offset, -100%)); } }
+  .now-title.marquee { text-overflow: clip; animation: marquee-scroll 8s linear infinite; animation-delay: 3s; }
   .now-artist { font-size: 12px; color: var(--text2); margin-top: 2px; }
 
   .btn-like {
@@ -1026,7 +1028,9 @@
     .track-item > *:nth-child(3),
     .track-list-header > *:nth-child(4),
     .track-item > *:nth-child(4) { display: none; }
-    .track-item, .track-list-header { grid-template-columns: 36px 1fr 60px; }
+    .track-item, .track-list-header { grid-template-columns: 36px 1fr auto; }
+    .track-dur { min-width: 0; width: auto; padding-right: 4px; }
+    .topbar-actions .btn { display: none; }
     .lyrics-panel { width: 100%; }
   }
 
@@ -2339,7 +2343,16 @@ function updatePlayBtn() {
 function updateNowPlaying() {
   if (state.currentIndex === -1) return;
   const t = state.tracks[state.currentIndex];
-  document.getElementById('now-title').textContent = t.title;
+  const nowTitleEl = document.getElementById('now-title');
+  nowTitleEl.textContent = t.title;
+  nowTitleEl.classList.remove('marquee');
+  requestAnimationFrame(() => {
+    if (nowTitleEl.scrollWidth > nowTitleEl.clientWidth) {
+      const offset = nowTitleEl.scrollWidth - nowTitleEl.clientWidth;
+      nowTitleEl.style.setProperty('--marquee-offset', `-${offset}px`);
+      nowTitleEl.classList.add('marquee');
+    }
+  });
   document.getElementById('now-artist').textContent = t.artist || '未知藝術家';
   
   const coverContent = t.cover
