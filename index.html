@@ -351,7 +351,7 @@
 
 
 
-  .now-info { min-width: 0; }
+  .now-info { min-width: 0; overflow: hidden; }
   .now-title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   @keyframes marquee-scroll { 0%, 15% { transform: translateX(0); } 60%, 70% { transform: translateX(var(--marquee-offset, 0px)); } 85%, 100% { transform: translateX(0); } }
   .now-title.marquee { animation: marquee-scroll 5s ease-in-out infinite; }
@@ -2299,10 +2299,13 @@ audio.addEventListener('loadedmetadata', () => {
   if (isFsOpen) {
     document.getElementById('fs-time-total').textContent = formatTime(audio.duration);
   }
-  // Save duration
+  // Save duration and update track list item
   if (state.currentIndex >= 0) {
-    state.tracks[state.currentIndex].duration = Math.round(audio.duration);
+    const track = state.tracks[state.currentIndex];
+    track.duration = Math.round(audio.duration);
     saveState();
+    const durEl = document.querySelector(`#ti-${track.id} .track-dur`);
+    if (durEl) durEl.textContent = formatTime(track.duration);
   }
 });
 
