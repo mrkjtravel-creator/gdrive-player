@@ -145,6 +145,9 @@
 
   .playlist-item:hover { background: var(--bg3); color: var(--text); }
   .playlist-item.active { color: var(--accent); }
+  .playlist-item.pl-dragging { opacity: 0.3; }
+  .playlist-item.drag-over-top { border-top: 2px solid var(--accent); }
+  .playlist-item.drag-over-bottom { border-bottom: 2px solid var(--accent); }
 
   .playlist-dot {
     width: 6px; height: 6px;
@@ -2550,6 +2553,124 @@ function renderSidebar() {
         </button>
       </div>
     </div>`).join('');
+
+  initPlaylistDrag();
+}
+
+function initPlaylistDrag() {
+  const list = document.getElementById('playlist-list');
+  let dragEl = null;
+  let clone = null;
+  let longPressTimer = null;
+  let isDragging = false;
+  let fingerOffsetY = 0;
+
+  function getItems() {
+    return Array.from(list.querySelectorAll('.playlist-item[id]'));
+  }
+
+  function cleanup() {
+    clearTimeout(longPressTimer);
+    longPressTimer = null;
+    if (clone) { clone.remove(); clone = null; }
+    if (dragEl) { dragEl.classList.remove('pl-dragging'); dragEl = null; }
+    getItems().forEach(i => i.classList.remove('drag-over-top', 'drag-over-bottom'));
+    isDragging = false;
+  }
+
+  getItems().forEach(item => {
+    item.addEventListener('touchstart', e => {
+      const touch = e.touches[0];
+      const rect = item.getBoundingClientRect();
+      fingerOffsetY = touch.clientY - rect.top;
+
+      longPressTimer = setTimeout(() => {
+        isDragging = true;
+        dragEl = item;
+        item.classList.add('pl-dragging');
+
+        clone = item.cloneNode(true);
+        Object.assign(clone.style, {
+          position: 'fixed',
+          left: rect.left + 'px',
+          top: (touch.clientY - fingerOffsetY) + 'px',
+          width: rect.width + 'px',
+          zIndex: '1000',
+          pointerEvents: 'none',
+          opacity: '0.95',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
+          borderRadius: '8px',
+          background: 'var(--bg3)',
+          margin: '0',
+          transition: 'none',
+        });
+        document.body.appendChild(clone);
+
+        if (navigator.vibrate) navigator.vibrate(30);
+      }, 420);
+    }, { passive: true });
+
+    item.addEventListener('touchmove', e => {
+      if (longPressTimer && !isDragging) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+        return;
+      }
+      if (!isDragging || !clone) return;
+      e.preventDefault();
+
+      const touch = e.touches[0];
+      clone.style.top = (touch.clientY - fingerOffsetY) + 'px';
+
+      getItems().forEach(i => i.classList.remove('drag-over-top', 'drag-over-bottom'));
+      for (const other of getItems()) {
+        if (other === dragEl) continue;
+        const r = other.getBoundingClientRect();
+        if (touch.clientY >= r.top && touch.clientY <= r.bottom) {
+          other.classList.add(touch.clientY < r.top + r.height / 2 ? 'drag-over-top' : 'drag-over-bottom');
+          break;
+        }
+      }
+    }, { passive: false });
+
+    function onEnd(e) {
+      if (!isDragging) { cleanup(); return; }
+
+      const touch = e.changedTouches[0];
+      let targetEl = null;
+      let insertBefore = true;
+
+      for (const other of getItems()) {
+        if (other === dragEl) continue;
+        const r = other.getBoundingClientRect();
+        if (touch.clientY >= r.top && touch.clientY <= r.bottom) {
+          targetEl = other;
+          insertBefore = touch.clientY < r.top + r.height / 2;
+          break;
+        }
+      }
+
+      const fromId = dragEl.id.replace('pli-', '');
+      cleanup();
+
+      if (targetEl) {
+        const toId = targetEl.id.replace('pli-', '');
+        const fromIdx = state.playlists.findIndex(p => p.id === fromId);
+        const toIdx = state.playlists.findIndex(p => p.id === toId);
+        if (fromIdx !== -1 && toIdx !== -1 && fromIdx !== toIdx) {
+          const [moved] = state.playlists.splice(fromIdx, 1);
+          const newToIdx = state.playlists.findIndex(p => p.id === toId);
+          state.playlists.splice(insertBefore ? newToIdx : newToIdx + 1, 0, moved);
+          saveState();
+          renderSidebar();
+          toast('順序已更新');
+        }
+      }
+    }
+
+    item.addEventListener('touchend', onEnd, { passive: true });
+    item.addEventListener('touchcancel', cleanup, { passive: true });
+  });
 }
 
 function createPlaylist() {
