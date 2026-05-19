@@ -2539,7 +2539,6 @@ function renderSidebar() {
   }
   list.innerHTML = state.playlists.map(pl => `
     <div class="playlist-item" id="pli-${pl.id}" onclick="setView('playlist','${pl.id}')">
-      <div class="playlist-dot"></div>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="pl-name-${pl.id}">${esc(pl.name)}</span>
       <span class="playlist-count">${pl.trackIds.length}</span>
       <div class="pl-actions" onclick="event.stopPropagation()">
