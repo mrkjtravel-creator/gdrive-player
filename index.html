@@ -315,6 +315,13 @@
   .eq-bars.playing span:nth-child(3) { animation: eq3 0.8s ease-in-out infinite 0.1s; }
   .eq-bars:not(.playing) span { height: 4px; }
 
+  .track-loading-pct {
+    font-size: 10px;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+
   /* ── Player Bar ── */
   .player-bar {
     background: var(--bg);
@@ -1036,7 +1043,7 @@
   }
 
   /* Progress fill via JS */
-  input[type=range].progress-fill { background: linear-gradient(to right, var(--accent) var(--pct,0%), var(--bg4) var(--pct,0%)); }
+  input[type=range].progress-fill { background: linear-gradient(to right, var(--accent) var(--pct,0%), rgba(255,255,255,0.18) var(--pct,0%), rgba(255,255,255,0.18) var(--buf,var(--pct,0%)), var(--bg4) var(--buf,var(--pct,0%))); }
   input[type=range].vol-fill { background: linear-gradient(to right, var(--text2) var(--pct,0%), var(--bg4) var(--pct,0%)); }
 
   /* Scrollbar global */
@@ -1686,6 +1693,7 @@ let state = {
 let isFsOpen = false;
 
 const audio = document.getElementById('audio-player');
+let loadingTrackId = null;
 
 // Load from localStorage
 function loadState() {
@@ -1939,8 +1947,8 @@ function playTrack(id) {
     const numEl = item.querySelector('.track-num');
     if (numEl) {
       if (isCurrent) {
-        // Set the active track's visualizer to bouncing
-        numEl.innerHTML = `<div class="eq-bars playing"><span></span><span></span><span></span></div>`;
+        // Show static bars until audio actually plays
+        numEl.innerHTML = `<div class="eq-bars"><span></span><span></span><span></span></div>`;
       } else {
         // Restore index number for all other tracks
         const siblings = Array.from(item.parentNode.querySelectorAll('.track-item'));
@@ -1956,13 +1964,31 @@ function playTrack(id) {
     state.currentBlobUrl = null;
   }
 
+  // Reset buffer bar for new track
+  document.getElementById('progress-bar').style.setProperty('--buf', '0%');
+  const fsBarEl = document.getElementById('fs-progress-bar');
+  if (fsBarEl) fsBarEl.style.setProperty('--buf', '0%');
+
   // Show status
   toast('正在從雲端載入音訊...');
 
   const targetIndex = state.currentIndex;
+  loadingTrackId = track.id;
+
+  // Progress callback: update track-num with download percentage
+  function onDownloadProgress(pct) {
+    if (state.currentIndex !== targetIndex || loadingTrackId !== track.id) return;
+    const numEl = document.querySelector(`#ti-${track.id} .track-num`);
+    if (!numEl) return;
+    if (pct >= 100) {
+      numEl.innerHTML = `<div class="eq-bars"><span></span><span></span><span></span></div>`;
+    } else {
+      numEl.innerHTML = `<span class="track-loading-pct">${pct}%</span>`;
+    }
+  }
 
   // 2. Resolve URL and load audio
-  resolveUrlAsync(track.url)
+  resolveUrlAsync(track.url, onDownloadProgress)
     .then(audioSrc => {
       // Race condition check: if user switched track during download, discard
       if (state.currentIndex !== targetIndex) {
@@ -1971,32 +1997,33 @@ function playTrack(id) {
         }
         return;
       }
-      
+      loadingTrackId = null;
       audio.src = audioSrc;
       audio.volume = state.volume / 100;
       return audio.play();
     })
     .then(() => {
       if (state.currentIndex !== targetIndex) return;
-      
+
       state.playing = true;
       updatePlayBtn();
-      
+
       // Ensure active visualizer is animating
       const activeItem = document.getElementById(`ti-${track.id}`);
       if (activeItem) {
         const eq = activeItem.querySelector('.eq-bars');
         if (eq) eq.classList.add('playing');
       }
-      
+
       updateMediaSession(track);
     })
     .catch(err => {
       if (state.currentIndex !== targetIndex) return;
+      loadingTrackId = null;
 
       state.playing = false;
       updatePlayBtn();
-      
+
       // Stop the active visualizer animation since playback failed
       const activeItem = document.getElementById(`ti-${track.id}`);
       if (activeItem) {
@@ -2026,11 +2053,11 @@ function playTrack(id) {
     });
 }
 
-async function resolveUrlAsync(url) {
+async function resolveUrlAsync(url, onProgress) {
   let fileId = null;
   const m1 = url.match(/\/file\/d\/([^/]+)/);
   const m2 = url.match(/[?&]id=([^&]+)/);
-  
+
   if (m1) fileId = m1[1];
   else if (m2) fileId = m2[1];
 
@@ -2040,23 +2067,35 @@ async function resolveUrlAsync(url) {
         const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
           headers: { Authorization: `Bearer ${state.accessToken}` }
         });
-        if (res.status === 401) {
-          throw new Error('401 Unauthorized');
+        if (res.status === 401) throw new Error('401 Unauthorized');
+        if (res.status === 403) throw new Error('403 Forbidden');
+        if (!res.ok) throw new Error(`HTTP status ${res.status}`);
+
+        const contentLength = res.headers.get('content-length');
+        const total = contentLength ? parseInt(contentLength, 10) : 0;
+        const reader = res.body.getReader();
+        const chunks = [];
+        let received = 0;
+
+        if (onProgress) onProgress(0);
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(value);
+          received += value.length;
+          if (total > 0 && onProgress) {
+            onProgress(Math.min(Math.floor((received / total) * 100), 99));
+          }
         }
-        if (res.status === 403) {
-          throw new Error('403 Forbidden');
-        }
-        if (!res.ok) {
-          throw new Error(`HTTP status ${res.status}`);
-        }
-        const blob = await res.blob();
+
+        const blob = new Blob(chunks);
         state.currentBlobUrl = URL.createObjectURL(blob);
+        if (onProgress) onProgress(100);
         return state.currentBlobUrl;
       } catch (e) {
         // Propagate explicit auth/permission errors
-        if (e.message.includes('401') || e.message.includes('403')) {
-          throw e;
-        }
+        if (e.message.includes('401') || e.message.includes('403')) throw e;
         console.warn('Authenticated fetch failed, falling back to public link:', e);
       }
     }
@@ -2278,6 +2317,16 @@ audio.addEventListener('error', (e) => {
   });
 });
 
+audio.addEventListener('progress', () => {
+  if (!audio.duration || !audio.buffered.length) return;
+  const buf = (audio.buffered.end(audio.buffered.length - 1) / audio.duration) * 100;
+  const bar = document.getElementById('progress-bar');
+  bar.style.setProperty('--buf', buf.toFixed(1) + '%');
+  if (isFsOpen) {
+    document.getElementById('fs-progress-bar').style.setProperty('--buf', buf.toFixed(1) + '%');
+  }
+});
+
 audio.addEventListener('timeupdate', () => {
   if (!audio.duration) return;
   const pct = (audio.currentTime / audio.duration) * 100;
@@ -2285,7 +2334,7 @@ audio.addEventListener('timeupdate', () => {
   bar.value = pct;
   bar.style.setProperty('--pct', pct.toFixed(1) + '%');
   document.getElementById('time-cur').textContent = formatTime(audio.currentTime);
-  
+
   if (isFsOpen) {
     const fsBar = document.getElementById('fs-progress-bar');
     fsBar.value = pct;
@@ -2470,9 +2519,10 @@ function updateLyrics() {
 }
 
 function refreshCurrentTrackRow() {
-  // Re-render EQ bars
   const track = state.tracks[state.currentIndex];
   if (!track) return;
+  // Don't overwrite while blob is being downloaded
+  if (loadingTrackId === track.id) return;
   const el = document.getElementById(`ti-${track.id}`);
   if (!el) return;
   const numEl = el.querySelector('.track-num');

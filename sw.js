@@ -1,4 +1,4 @@
-const CACHE = 'gdrive-player-v2';
+const CACHE = 'gdrive-player-v3';
 const ASSETS = ['./'];
 
 self.addEventListener('install', e => {
